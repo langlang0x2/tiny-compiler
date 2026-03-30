@@ -1,0 +1,31 @@
+# ========= 字符集 =========
+letter      'a'~'z' | 'A'~'Z'
+digit       '0'~'9'
+
+# ========= 关键字 =========
+IF          'i''f'
+THEN        't''h''e''n'
+ELSE        'e''l''s''e'
+END         'e''n''d'
+REPEAT      'r''e''p''e''a''t'
+UNTIL       'u''n''t''i''l'
+READ        'r''e''a''d'
+WRITE       'w''r''i''t''e'
+
+# ========= 标识符 / 数字 =========
+ID          letter (letter | digit)*
+NUM         digit+
+
+# ========= 运算符 =========
+ASSIGN      ':' '='
+EQ          '='
+LT          '<'
+PLUS        '+'
+MINUS       '-'
+TIMES       '*'
+OVER        '/'
+
+# ========= 分隔符 =========
+LPAREN      '('
+RPAREN      ')'
+SEMI        ';'
