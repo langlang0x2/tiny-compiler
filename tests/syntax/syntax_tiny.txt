@@ -1,0 +1,17 @@
+# TINY 语言语法，用于语法分析测试。
+%start program
+%terminals if then else end repeat until read write id num := ; < = + - * / ( )
+%nonterminals program stmt_seq statement if_stmt repeat_stmt assign_stmt read_stmt write_stmt exp simple_exp term factor
+
+program -> stmt_seq
+stmt_seq -> stmt_seq ; statement | statement
+statement -> if_stmt | repeat_stmt | assign_stmt | read_stmt | write_stmt
+if_stmt -> if exp then stmt_seq end | if exp then stmt_seq else stmt_seq end
+repeat_stmt -> repeat stmt_seq until exp
+assign_stmt -> id := exp
+read_stmt -> read id
+write_stmt -> write exp
+exp -> exp < simple_exp | exp = simple_exp | simple_exp
+simple_exp -> simple_exp + term | simple_exp - term | term
+term -> term * factor | term / factor | factor
+factor -> ( exp ) | num | id

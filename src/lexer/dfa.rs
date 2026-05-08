@@ -58,7 +58,11 @@ pub fn nfa_to_dfa(nfa: &Graph, charset_table: &mut CharSetTable) -> Result<Graph
     })
 }
 
-pub fn dfa_match(dfa: &Graph, charset_table: &CharSetTable, input: &str) -> Result<Option<String>, String> {
+pub fn dfa_match(
+    dfa: &Graph,
+    charset_table: &CharSetTable,
+    input: &str,
+) -> Result<Option<String>, String> {
     let mut current_state = dfa.start_state;
 
     for ch in input.chars() {
@@ -229,8 +233,7 @@ fn build_dfa_state(id: usize, subset: &BTreeSet<usize>, nfa: &Graph) -> State {
 mod tests {
     use super::{dfa_match, nfa_to_dfa};
     use crate::lexer::{
-        build_charset_table, build_token_regular_tables, merge_nfas,
-        rule::parse_rules,
+        build_charset_table, build_token_regular_tables, merge_nfas, rule::parse_rules,
     };
 
     #[test]
@@ -255,7 +258,10 @@ ID letter (letter | digit)*
 
         assert!(!dfa.states.is_empty());
         assert!(!dfa.edges.is_empty());
-        assert!(dfa.states.iter().any(|state| state.category.as_deref() == Some("ID")));
+        assert!(dfa
+            .states
+            .iter()
+            .any(|state| state.category.as_deref() == Some("ID")));
     }
 
     #[test]
@@ -308,8 +314,14 @@ NUM digit+
         let merged_nfa = merge_nfas(&nfas);
         let dfa = nfa_to_dfa(&merged_nfa, &mut charset_table).unwrap();
 
-        assert_eq!(dfa_match(&dfa, &charset_table, "abc123").unwrap(), Some("ID".to_string()));
-        assert_eq!(dfa_match(&dfa, &charset_table, "12345").unwrap(), Some("NUM".to_string()));
+        assert_eq!(
+            dfa_match(&dfa, &charset_table, "abc123").unwrap(),
+            Some("ID".to_string())
+        );
+        assert_eq!(
+            dfa_match(&dfa, &charset_table, "12345").unwrap(),
+            Some("NUM".to_string())
+        );
         assert_eq!(dfa_match(&dfa, &charset_table, "@@@").unwrap(), None);
     }
 
@@ -326,7 +338,10 @@ NUM digit+
         let merged_nfa = merge_nfas(&nfas);
         let dfa = nfa_to_dfa(&merged_nfa, &mut charset_table).unwrap();
 
-        assert_eq!(dfa_match(&dfa, &charset_table, "aabb").unwrap(), Some("A".to_string()));
+        assert_eq!(
+            dfa_match(&dfa, &charset_table, "aabb").unwrap(),
+            Some("A".to_string())
+        );
     }
 
     #[test]

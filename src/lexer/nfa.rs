@@ -70,11 +70,7 @@ impl CharSetTable {
         Ok(self.insert_segments(segments))
     }
 
-    pub fn difference_charset_char(
-        &mut self,
-        charset_id: usize,
-        c: char,
-    ) -> Result<usize, String> {
+    pub fn difference_charset_char(&mut self, charset_id: usize, c: char) -> Result<usize, String> {
         let mut result = Vec::new();
 
         for (from, to) in self.segments(charset_id)? {
@@ -189,7 +185,11 @@ pub struct Graph {
 
 impl Graph {
     pub fn mark_accepting(&mut self, category: Option<String>) {
-        if let Some(state) = self.states.iter_mut().find(|state| state.id == self.end_state) {
+        if let Some(state) = self
+            .states
+            .iter_mut()
+            .find(|state| state.id == self.end_state)
+        {
             state.state_type = StateType::Match;
             state.category = category;
         }
@@ -217,9 +217,11 @@ impl Graph {
         let mut stack: Vec<usize> = states.iter().copied().collect();
 
         while let Some(state_id) = stack.pop() {
-            for edge in self.edges.iter().filter(|edge| {
-                edge.from_state == state_id && edge.driver_type == DriverType::Null
-            }) {
+            for edge in self
+                .edges
+                .iter()
+                .filter(|edge| edge.from_state == state_id && edge.driver_type == DriverType::Null)
+            {
                 if closure.insert(edge.to_state) {
                     stack.push(edge.to_state);
                 }
@@ -524,7 +526,10 @@ mod tests {
         let removed = table.difference_charset_char(with_underscore, 'm').unwrap();
 
         assert_eq!(table.segments(letter).unwrap(), vec![('a', 'z')]);
-        assert_eq!(table.segments(with_underscore).unwrap(), vec![('_', '_'), ('a', 'z')]);
+        assert_eq!(
+            table.segments(with_underscore).unwrap(),
+            vec![('_', '_'), ('a', 'z')]
+        );
         assert_eq!(
             table.segments(removed).unwrap(),
             vec![('_', '_'), ('a', 'l'), ('n', 'z')]

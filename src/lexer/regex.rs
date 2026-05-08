@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use super::{
     nfa::{
-        CharSetTable, DriverType, Graph, CHARSET_ID_BASE, closure_nfa, generate_basic_nfa,
-        plus_closure_nfa, product_nfa, union_nfa, zero_or_one_nfa,
+        closure_nfa, generate_basic_nfa, plus_closure_nfa, product_nfa, union_nfa, zero_or_one_nfa,
+        CharSetTable, DriverType, Graph, CHARSET_ID_BASE,
     },
     rule::TokenRule,
 };
@@ -180,8 +180,12 @@ impl RegularTable {
             .ok_or_else(|| format!("empty regular table for {}", self.token_name))?;
         let mut graph_cache = HashMap::new();
         let mut charset_cache = HashMap::new();
-        let mut graph =
-            self.build_expr_nfa(root.regular_id, charset_table, &mut graph_cache, &mut charset_cache)?;
+        let mut graph = self.build_expr_nfa(
+            root.regular_id,
+            charset_table,
+            &mut graph_cache,
+            &mut charset_cache,
+        )?;
         graph.mark_accepting(Some(self.token_name.clone()));
         Ok(graph)
     }
@@ -332,7 +336,12 @@ impl RegularTable {
                 charset_table.range(from, to)?
             }
             '|' => {
-                let left = self.resolve_charset_operand(expr.operand_id1, expr.type1, charset_table, charset_cache)?;
+                let left = self.resolve_charset_operand(
+                    expr.operand_id1,
+                    expr.type1,
+                    charset_table,
+                    charset_cache,
+                )?;
                 let right = self.resolve_charset_operand(
                     expr.operand_id2.unwrap(),
                     expr.type2.unwrap(),
@@ -340,7 +349,9 @@ impl RegularTable {
                     charset_cache,
                 )?;
                 match (left, right) {
-                    (CharsetValue::Char(c1), CharsetValue::Char(c2)) => charset_table.union_chars(c1, c2),
+                    (CharsetValue::Char(c1), CharsetValue::Char(c2)) => {
+                        charset_table.union_chars(c1, c2)
+                    }
                     (CharsetValue::Charset(id), CharsetValue::Char(c))
                     | (CharsetValue::Char(c), CharsetValue::Charset(id)) => {
                         charset_table.union_charset_char(id, c)?
@@ -351,7 +362,12 @@ impl RegularTable {
                 }
             }
             '-' => {
-                let left = self.resolve_charset_operand(expr.operand_id1, expr.type1, charset_table, charset_cache)?;
+                let left = self.resolve_charset_operand(
+                    expr.operand_id1,
+                    expr.type1,
+                    charset_table,
+                    charset_cache,
+                )?;
                 let right = self.resolve_charset_operand(
                     expr.operand_id2.unwrap(),
                     expr.type2.unwrap(),
@@ -370,7 +386,12 @@ impl RegularTable {
                     }
                 }
             }
-            _ => return Err(format!("regular id {} does not evaluate to a charset", regular_id)),
+            _ => {
+                return Err(format!(
+                    "regular id {} does not evaluate to a charset",
+                    regular_id
+                ))
+            }
         };
 
         charset_cache.insert(regular_id, charset_id);
@@ -386,16 +407,19 @@ impl RegularTable {
     ) -> Result<CharsetValue, String> {
         match operand_type {
             OperandType::Char => {
-                let ch = char::from_u32(operand_id as u32).ok_or_else(|| "invalid char id".to_string())?;
+                let ch = char::from_u32(operand_id as u32)
+                    .ok_or_else(|| "invalid char id".to_string())?;
                 Ok(CharsetValue::Char(ch))
             }
             OperandType::Charset => {
                 if operand_id >= CHARSET_ID_BASE {
                     Ok(CharsetValue::Charset(operand_id))
                 } else {
-                    Ok(CharsetValue::Charset(
-                        self.evaluate_charset_expr(operand_id, charset_table, charset_cache)?,
-                    ))
+                    Ok(CharsetValue::Charset(self.evaluate_charset_expr(
+                        operand_id,
+                        charset_table,
+                        charset_cache,
+                    )?))
                 }
             }
             OperandType::Regular => Err("regular operand cannot be used as charset".to_string()),
@@ -403,7 +427,9 @@ impl RegularTable {
     }
 }
 
-pub fn build_charset_table(rules: &[TokenRule]) -> Result<(CharSetTable, HashMap<String, usize>), String> {
+pub fn build_charset_table(
+    rules: &[TokenRule],
+) -> Result<(CharSetTable, HashMap<String, usize>), String> {
     let mut table = CharSetTable::new();
     let mut charset_ids = HashMap::new();
 
@@ -529,11 +555,19 @@ fn evaluate_charset_rule(
                 stack.push(CharsetValue::Charset(id));
             }
             RegexToken::Operator(op) => {
-                let right = stack.pop().ok_or_else(|| format!("operator '{op}' missing operand"))?;
-                let left = stack.pop().ok_or_else(|| format!("operator '{op}' missing operand"))?;
+                let right = stack
+                    .pop()
+                    .ok_or_else(|| format!("operator '{op}' missing operand"))?;
+                let left = stack
+                    .pop()
+                    .ok_or_else(|| format!("operator '{op}' missing operand"))?;
                 let id = match (op, left, right) {
-                    ('~', CharsetValue::Char(from), CharsetValue::Char(to)) => table.range(from, to)?,
-                    ('|', CharsetValue::Char(c1), CharsetValue::Char(c2)) => table.union_chars(c1, c2),
+                    ('~', CharsetValue::Char(from), CharsetValue::Char(to)) => {
+                        table.range(from, to)?
+                    }
+                    ('|', CharsetValue::Char(c1), CharsetValue::Char(c2)) => {
+                        table.union_chars(c1, c2)
+                    }
                     ('|', CharsetValue::Charset(id), CharsetValue::Char(c))
                     | ('|', CharsetValue::Char(c), CharsetValue::Charset(id)) => {
                         table.union_charset_char(id, c)?

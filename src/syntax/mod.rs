@@ -1,157 +1,66 @@
 mod first_follow;
 mod grammar;
+mod grammar_file;
 mod lr0;
 mod slr;
 
-#[allow(unused_imports)]
-pub use grammar::{
-    Grammar, GrammarSymbol, NonTerminalSymbol, Production, ProductionInfo, SymbolType,
-    TerminalSymbol,
-};
-#[allow(unused_imports)]
-pub use lr0::{
-    build_lr0_dfa, exhaust_transition, get_closure, Dfa, ItemCategory, ItemSet, LR0Item,
-    TransitionEdge,
-};
-#[allow(unused_imports)]
-pub use slr::{
-    build_slr_parse_table, is_slr1, ActionCategory, ActionCell, GotoCell, ParseTable,
-};
+pub use grammar::{Grammar, SymbolType};
+pub use lr0::{build_lr0_dfa, Dfa};
+pub use slr::{build_slr_parse_table, is_slr1, ActionCategory};
 
-pub fn arithmetic_expression_grammar() -> Grammar {
-    let mut grammar = Grammar::new();
-    for terminal in ["id", "+", "*", "(", ")"] {
-        grammar.add_terminal(terminal, "TOKEN");
-    }
-    for non_terminal in ["E", "T", "F"] {
-        grammar.add_non_terminal(non_terminal);
-    }
-    grammar.set_start_symbol("E");
-    grammar.add_production("E", &["E", "+", "T"]);
-    grammar.add_production("E", &["T"]);
-    grammar.add_production("T", &["T", "*", "F"]);
-    grammar.add_production("T", &["F"]);
-    grammar.add_production("F", &["(", "E", ")"]);
-    grammar.add_production("F", &["id"]);
-    grammar.compute_first_sets();
-    grammar.compute_follow_sets();
-    grammar
-}
+pub fn run(path: &str) -> Result<(), String> {
+    let grammar = grammar_file::load_grammar(path)?;
+    println!("================ Grammar: {} ================", path);
+    print_first_and_follow(&grammar);
 
-pub fn tiny_grammar() -> Grammar {
-    let mut grammar = Grammar::new();
-    for terminal in [
-        "if", "then", "else", "end", "repeat", "until", "read", "write", "id", "num", ":=",
-        ";", "<", "=", "+", "-", "*", "/", "(", ")",
-    ] {
-        grammar.add_terminal(terminal, "TOKEN");
-    }
-    for non_terminal in [
-        "program",
-        "stmt_seq",
-        "statement",
-        "if_stmt",
-        "repeat_stmt",
-        "assign_stmt",
-        "read_stmt",
-        "write_stmt",
-        "exp",
-        "simple_exp",
-        "term",
-        "factor",
-    ] {
-        grammar.add_non_terminal(non_terminal);
-    }
+    let augmented = grammar.augmented();
+    let dfa = build_lr0_dfa(&augmented);
+    let parse_table = build_slr_parse_table(&augmented, &dfa);
 
-    grammar.set_start_symbol("program");
-    grammar.add_production("program", &["stmt_seq"]);
-    grammar.add_production("stmt_seq", &["stmt_seq", ";", "statement"]);
-    grammar.add_production("stmt_seq", &["statement"]);
-    grammar.add_production("statement", &["if_stmt"]);
-    grammar.add_production("statement", &["repeat_stmt"]);
-    grammar.add_production("statement", &["assign_stmt"]);
-    grammar.add_production("statement", &["read_stmt"]);
-    grammar.add_production("statement", &["write_stmt"]);
-    grammar.add_production("if_stmt", &["if", "exp", "then", "stmt_seq", "end"]);
-    grammar.add_production(
-        "if_stmt",
-        &["if", "exp", "then", "stmt_seq", "else", "stmt_seq", "end"],
+    println!("LR(0) item sets: {}", dfa.item_sets.len());
+    println!("LR(0) transitions: {}", dfa.edges.len());
+    println!(
+        "Is SLR(1): {}",
+        if is_slr1(&parse_table) { "YES" } else { "NO" }
     );
-    grammar.add_production("repeat_stmt", &["repeat", "stmt_seq", "until", "exp"]);
-    grammar.add_production("assign_stmt", &["id", ":=", "exp"]);
-    grammar.add_production("read_stmt", &["read", "id"]);
-    grammar.add_production("write_stmt", &["write", "exp"]);
-    grammar.add_production("exp", &["exp", "<", "simple_exp"]);
-    grammar.add_production("exp", &["exp", "=", "simple_exp"]);
-    grammar.add_production("exp", &["simple_exp"]);
-    grammar.add_production("simple_exp", &["simple_exp", "+", "term"]);
-    grammar.add_production("simple_exp", &["simple_exp", "-", "term"]);
-    grammar.add_production("simple_exp", &["term"]);
-    grammar.add_production("term", &["term", "*", "factor"]);
-    grammar.add_production("term", &["term", "/", "factor"]);
-    grammar.add_production("term", &["factor"]);
-    grammar.add_production("factor", &["(", "exp", ")"]);
-    grammar.add_production("factor", &["num"]);
-    grammar.add_production("factor", &["id"]);
 
-    grammar.compute_first_sets();
-    grammar.compute_follow_sets();
-    grammar
-}
-
-pub fn run_demo() {
-    for (label, grammar) in [
-        ("Arithmetic Expression", arithmetic_expression_grammar()),
-        ("TINY", tiny_grammar()),
-    ] {
-        println!("================ {} Grammar ================", label);
-        print_first_and_follow(&grammar);
-
-        let augmented = grammar.augmented();
-        let dfa = build_lr0_dfa(&augmented);
-        let parse_table = build_slr_parse_table(&augmented, &dfa);
-
-        println!("LR(0) item sets: {}", dfa.item_sets.len());
-        println!("LR(0) transitions: {}", dfa.edges.len());
-        println!("Is SLR(1): {}", if is_slr1(&parse_table) { "YES" } else { "NO" });
-
-        if !parse_table.conflicts.is_empty() {
-            println!("Conflicts:");
-            for conflict in &parse_table.conflicts {
-                println!("  {conflict}");
-            }
+    if !parse_table.conflicts.is_empty() {
+        println!("Conflicts:");
+        for conflict in &parse_table.conflicts {
+            println!("  {conflict}");
         }
-
-        println!("Production Info:");
-        for info in augmented.production_info_table() {
-            println!(
-                "  [{}] {} body_size={}",
-                info.index_id, info.head_name, info.body_size
-            );
-        }
-
-        println!("ACTION Table:");
-        for cell in &parse_table.action_cells {
-            let action_text = match cell.action_type {
-                ActionCategory::Shift => format!("s{}", cell.id),
-                ActionCategory::Reduce => format!("r{}", cell.id),
-                ActionCategory::Accept => "acc".to_string(),
-            };
-            println!(
-                "  ACTION[{}, {}] = {}",
-                cell.state_id, cell.terminal_symbol_name, action_text
-            );
-        }
-
-        println!("GOTO Table:");
-        for cell in &parse_table.goto_cells {
-            println!(
-                "  GOTO[{}, {}] = {}",
-                cell.state_id, cell.non_terminal_symbol_name, cell.next_state_id
-            );
-        }
-        println!();
     }
+
+    println!("Production Info:");
+    for info in augmented.production_info_table() {
+        println!(
+            "  [{}] {} body_size={}",
+            info.index_id, info.head_name, info.body_size
+        );
+    }
+
+    println!("ACTION Table:");
+    for cell in &parse_table.action_cells {
+        let action_text = match cell.action_type {
+            ActionCategory::Shift => format!("s{}", cell.id),
+            ActionCategory::Reduce => format!("r{}", cell.id),
+            ActionCategory::Accept => "acc".to_string(),
+        };
+        println!(
+            "  ACTION[{}, {}] = {}",
+            cell.state_id, cell.terminal_symbol_name, action_text
+        );
+    }
+
+    println!("GOTO Table:");
+    for cell in &parse_table.goto_cells {
+        println!(
+            "  GOTO[{}, {}] = {}",
+            cell.state_id, cell.non_terminal_symbol_name, cell.next_state_id
+        );
+    }
+
+    Ok(())
 }
 
 fn print_first_and_follow(grammar: &Grammar) {
@@ -179,79 +88,64 @@ fn print_first_and_follow(grammar: &Grammar) {
 
 #[cfg(test)]
 mod tests {
+    use super::grammar_file::parse_grammar;
     use super::*;
-    use std::collections::{BTreeSet, HashSet};
+    use std::{fs, path::PathBuf};
 
-    fn set_of(grammar: &Grammar, names: &[&str]) -> BTreeSet<String> {
-        let expected = names
-            .iter()
-            .map(|name| name.to_string())
-            .collect::<BTreeSet<_>>();
-        let available = grammar
-            .terminals
-            .iter()
-            .enumerate()
-            .map(|(terminal_id, _)| grammar.terminal_name(terminal_id).to_string())
-            .collect::<BTreeSet<_>>();
-        expected.intersection(&available).cloned().collect()
-    }
-
-    fn terminal_names(grammar: &Grammar, set: &HashSet<usize>) -> BTreeSet<String> {
-        set.iter()
-            .map(|terminal| grammar.terminal_name(*terminal).to_string())
-            .collect()
+    fn syntax_test_files() -> Vec<PathBuf> {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/syntax");
+        let mut files = fs::read_dir(&dir)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", dir.display()))
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "txt"))
+            .collect::<Vec<_>>();
+        files.sort();
+        assert!(
+            !files.is_empty(),
+            "no syntax test files in {}",
+            dir.display()
+        );
+        files
     }
 
     #[test]
-    fn arithmetic_first_and_follow_are_correct() {
-        let grammar = arithmetic_expression_grammar();
-        let e = grammar.non_terminal_id("E");
-        let t = grammar.non_terminal_id("T");
-        let f = grammar.non_terminal_id("F");
+    fn syntax_test_files_can_be_parsed() {
+        for path in syntax_test_files() {
+            let content = fs::read_to_string(&path).unwrap();
+            let grammar = parse_grammar(&content)
+                .unwrap_or_else(|err| panic!("failed to parse {}: {err}", path.display()));
 
-        assert_eq!(
-            terminal_names(&grammar, &grammar.non_terminals[e].first_set),
-            set_of(&grammar, &["(", "id"])
-        );
-        assert_eq!(
-            terminal_names(&grammar, &grammar.non_terminals[t].first_set),
-            set_of(&grammar, &["(", "id"])
-        );
-        assert_eq!(
-            terminal_names(&grammar, &grammar.non_terminals[f].first_set),
-            set_of(&grammar, &["(", "id"])
-        );
-        assert_eq!(
-            terminal_names(&grammar, &grammar.non_terminals[e].follow_set),
-            set_of(&grammar, &[")", "EOF", "+"])
-        );
-        assert_eq!(
-            terminal_names(&grammar, &grammar.non_terminals[t].follow_set),
-            set_of(&grammar, &[")", "*", "EOF", "+"])
-        );
-        assert_eq!(
-            terminal_names(&grammar, &grammar.non_terminals[f].follow_set),
-            set_of(&grammar, &[")", "*", "EOF", "+"])
-        );
+            assert!(
+                !grammar.productions.is_empty(),
+                "{} has no productions",
+                path.display()
+            );
+            assert!(
+                grammar.non_terminals[grammar.start_non_terminal]
+                    .follow_set
+                    .contains(&grammar.eof_terminal),
+                "{} start symbol FOLLOW set is missing EOF",
+                path.display()
+            );
+        }
     }
 
     #[test]
-    fn arithmetic_grammar_is_slr1() {
-        let grammar = arithmetic_expression_grammar().augmented();
-        let dfa = build_lr0_dfa(&grammar);
-        let table = build_slr_parse_table(&grammar, &dfa);
+    fn syntax_test_files_are_slr1() {
+        for path in syntax_test_files() {
+            let content = fs::read_to_string(&path).unwrap();
+            let grammar = parse_grammar(&content)
+                .unwrap_or_else(|err| panic!("failed to parse {}: {err}", path.display()))
+                .augmented();
+            let dfa = build_lr0_dfa(&grammar);
+            let table = build_slr_parse_table(&grammar, &dfa);
 
-        assert!(is_slr1(&table));
-        assert!(!table.action_cells.is_empty());
-        assert!(!table.goto_cells.is_empty());
-    }
-
-    #[test]
-    fn tiny_grammar_is_slr1() {
-        let grammar = tiny_grammar().augmented();
-        let dfa = build_lr0_dfa(&grammar);
-        let table = build_slr_parse_table(&grammar, &dfa);
-
-        assert!(is_slr1(&table), "conflicts: {:?}", table.conflicts);
+            assert!(
+                is_slr1(&table),
+                "{} conflicts: {:?}",
+                path.display(),
+                table.conflicts
+            );
+        }
     }
 }

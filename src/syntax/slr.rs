@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use super::{Dfa, Grammar, SymbolType};
 
@@ -62,11 +62,11 @@ pub fn build_slr_parse_table(grammar: &Grammar, dfa: &Dfa) -> ParseTable {
 
     for item_set in &dfa.item_sets {
         for item in &item_set.items {
-            if item.dot_position != grammar.item_body_len(item.production) {
+            let production = &grammar.productions[item.production];
+            if item.dot_position != production.body.len() {
                 continue;
             }
 
-            let production = &grammar.productions[item.production];
             if production.head == grammar.start_non_terminal {
                 let accept = ActionCell {
                     state_id: item_set.state_id,
@@ -96,11 +96,13 @@ pub fn build_slr_parse_table(grammar: &Grammar, dfa: &Dfa) -> ParseTable {
 
     let mut action_cells = action_map.into_values().collect::<Vec<_>>();
     action_cells.sort_by(|a, b| {
-        (a.state_id, a.terminal_symbol_name.as_str()).cmp(&(b.state_id, b.terminal_symbol_name.as_str()))
+        (a.state_id, a.terminal_symbol_name.as_str())
+            .cmp(&(b.state_id, b.terminal_symbol_name.as_str()))
     });
     let mut goto_cells = goto_map.into_values().collect::<Vec<_>>();
     goto_cells.sort_by(|a, b| {
-        (a.state_id, a.non_terminal_symbol_name.as_str()).cmp(&(b.state_id, b.non_terminal_symbol_name.as_str()))
+        (a.state_id, a.non_terminal_symbol_name.as_str())
+            .cmp(&(b.state_id, b.non_terminal_symbol_name.as_str()))
     });
 
     ParseTable {
@@ -120,20 +122,22 @@ fn insert_action(
     conflicts: &mut Vec<String>,
 ) {
     let key = (cell.state_id, cell.terminal_symbol_name.clone());
-    if let Some(existing) = action_map.get(&key) {
-        if existing != &cell {
+    match action_map.entry(key) {
+        Entry::Occupied(existing) if existing.get() != &cell => {
             conflicts.push(format!(
                 "ACTION conflict at state {}, symbol {}: {:?}{} vs {:?}{}",
                 cell.state_id,
                 cell.terminal_symbol_name,
-                existing.action_type,
-                existing.id,
+                existing.get().action_type,
+                existing.get().id,
                 cell.action_type,
                 cell.id
             ));
         }
-    } else {
-        action_map.insert(key, cell);
+        Entry::Vacant(entry) => {
+            entry.insert(cell);
+        }
+        Entry::Occupied(_) => {}
     }
 }
 
@@ -143,17 +147,19 @@ fn insert_goto(
     conflicts: &mut Vec<String>,
 ) {
     let key = (cell.state_id, cell.non_terminal_symbol_name.clone());
-    if let Some(existing) = goto_map.get(&key) {
-        if existing != &cell {
+    match goto_map.entry(key) {
+        Entry::Occupied(existing) if existing.get() != &cell => {
             conflicts.push(format!(
                 "GOTO conflict at state {}, symbol {}: {} vs {}",
                 cell.state_id,
                 cell.non_terminal_symbol_name,
-                existing.next_state_id,
+                existing.get().next_state_id,
                 cell.next_state_id
             ));
         }
-    } else {
-        goto_map.insert(key, cell);
+        Entry::Vacant(entry) => {
+            entry.insert(cell);
+        }
+        Entry::Occupied(_) => {}
     }
 }

@@ -18,8 +18,6 @@ pub struct GrammarSymbol {
 #[derive(Clone, Debug)]
 pub struct TerminalSymbol {
     pub symbol_id: usize,
-    #[allow(dead_code)]
-    pub category: String,
 }
 
 #[derive(Clone, Debug)]
@@ -28,7 +26,6 @@ pub struct NonTerminalSymbol {
     pub production_ids: Vec<usize>,
     pub first_set: HashSet<usize>,
     pub follow_set: HashSet<usize>,
-    pub dependent_set_in_follow: HashSet<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -70,18 +67,18 @@ impl Grammar {
             eof_terminal: 0,
             symbol_lookup: HashMap::new(),
         };
-        let epsilon = grammar.add_terminal_internal("e", "NULL", SymbolType::Null);
-        let eof = grammar.add_terminal("EOF", "ENDMARK");
+        let epsilon = grammar.add_terminal_internal("e", SymbolType::Null);
+        let eof = grammar.add_terminal("EOF");
         grammar.epsilon_terminal = epsilon;
         grammar.eof_terminal = eof;
         grammar
     }
 
-    pub fn add_terminal(&mut self, name: &str, category: &str) -> usize {
-        self.add_terminal_internal(name, category, SymbolType::Terminal)
+    pub fn add_terminal(&mut self, name: &str) -> usize {
+        self.add_terminal_internal(name, SymbolType::Terminal)
     }
 
-    fn add_terminal_internal(&mut self, name: &str, category: &str, symbol_type: SymbolType) -> usize {
+    fn add_terminal_internal(&mut self, name: &str, symbol_type: SymbolType) -> usize {
         if let Some(&symbol_id) = self.symbol_lookup.get(name) {
             let symbol = &self.symbols[symbol_id];
             return symbol
@@ -97,10 +94,7 @@ impl Grammar {
             terminal_id: Some(terminal_id),
             non_terminal_id: None,
         });
-        self.terminals.push(TerminalSymbol {
-            symbol_id,
-            category: category.to_string(),
-        });
+        self.terminals.push(TerminalSymbol { symbol_id });
         self.symbol_lookup.insert(name.to_string(), symbol_id);
         terminal_id
     }
@@ -126,7 +120,6 @@ impl Grammar {
             production_ids: Vec::new(),
             first_set: HashSet::new(),
             follow_set: HashSet::new(),
-            dependent_set_in_follow: HashSet::new(),
         });
         self.symbol_lookup.insert(name.to_string(), symbol_id);
         non_terminal_id
@@ -160,12 +153,8 @@ impl Grammar {
             .unwrap_or_else(|| panic!("unknown grammar symbol: {name}"))
     }
 
-    #[allow(dead_code)]
-    pub fn terminal_id(&self, name: &str) -> usize {
-        let symbol_id = self.symbol_id(name);
-        self.symbols[symbol_id]
-            .terminal_id
-            .unwrap_or_else(|| panic!("{name} is not a terminal"))
+    pub fn has_symbol(&self, name: &str) -> bool {
+        self.symbol_lookup.contains_key(name)
     }
 
     pub fn non_terminal_id(&self, name: &str) -> usize {
@@ -189,10 +178,6 @@ impl Grammar {
 
     pub fn symbol_type(&self, symbol_id: usize) -> SymbolType {
         self.symbols[symbol_id].symbol_type
-    }
-
-    pub fn item_body_len(&self, production_id: usize) -> usize {
-        self.productions[production_id].body.len()
     }
 
     pub fn production_info_table(&self) -> Vec<ProductionInfo> {
@@ -232,7 +217,9 @@ impl Grammar {
 
     pub fn augmented(&self) -> Self {
         let mut grammar = self.clone();
-        let original_start_name = grammar.non_terminal_name(grammar.start_non_terminal).to_string();
+        let original_start_name = grammar
+            .non_terminal_name(grammar.start_non_terminal)
+            .to_string();
         let augmented_name = format!("{}'", original_start_name);
         let augmented_start = grammar.add_non_terminal(&augmented_name);
         grammar.start_non_terminal = augmented_start;
@@ -242,7 +229,6 @@ impl Grammar {
             non_terminal.production_ids.clear();
             non_terminal.first_set.clear();
             non_terminal.follow_set.clear();
-            non_terminal.dependent_set_in_follow.clear();
         }
         grammar.productions.clear();
 

@@ -17,10 +17,7 @@ pub fn parse_rules(content: &str) -> Result<Vec<TokenRule>, String> {
             .ok_or_else(|| format!("line {} is missing a token name", index + 1))?;
 
         if regex.is_empty() {
-            return Err(format!(
-                "line {} is missing a regex expression",
-                index + 1
-            ));
+            return Err(format!("line {} is missing a regex expression", index + 1));
         }
 
         rules.push(TokenRule {

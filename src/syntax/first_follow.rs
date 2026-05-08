@@ -20,8 +20,10 @@ impl Grammar {
             let mut changed = false;
 
             for production_id in 0..self.productions.len() {
-                let first_set =
-                    self.first_of_sequence_with_snapshot(&self.productions[production_id].body, &snapshot);
+                let first_set = self.first_of_sequence_with_snapshot(
+                    &self.productions[production_id].body,
+                    &snapshot,
+                );
                 if extend_set(&mut self.productions[production_id].first_set, &first_set) {
                     changed = true;
                 }
@@ -40,7 +42,6 @@ impl Grammar {
     pub fn compute_follow_sets(&mut self) {
         for non_terminal in &mut self.non_terminals {
             non_terminal.follow_set.clear();
-            non_terminal.dependent_set_in_follow.clear();
         }
         self.non_terminals[self.start_non_terminal]
             .follow_set
@@ -51,10 +52,10 @@ impl Grammar {
             .iter()
             .map(|nt| nt.first_set.clone())
             .collect::<Vec<_>>();
+        let mut follow_dependencies = vec![HashSet::new(); self.non_terminals.len()];
 
-        for production_id in 0..self.productions.len() {
-            let body = self.productions[production_id].body.clone();
-            let head = self.productions[production_id].head;
+        for production in &self.productions {
+            let body = &production.body;
 
             for index in 0..body.len() {
                 let current_symbol = body[index];
@@ -75,9 +76,7 @@ impl Grammar {
                 }
 
                 if suffix.is_empty() || suffix_first.contains(&self.epsilon_terminal) {
-                    self.non_terminals[current_non_terminal]
-                        .dependent_set_in_follow
-                        .insert(head);
+                    follow_dependencies[current_non_terminal].insert(production.head);
                 }
             }
         }
@@ -90,14 +89,11 @@ impl Grammar {
                 .collect::<Vec<_>>();
             let mut changed = false;
 
-            for non_terminal_id in 0..self.non_terminals.len() {
-                let dependencies = self.non_terminals[non_terminal_id]
-                    .dependent_set_in_follow
-                    .clone();
+            for (non_terminal_id, dependencies) in follow_dependencies.iter().enumerate() {
                 for dependency in dependencies {
                     if extend_set(
                         &mut self.non_terminals[non_terminal_id].follow_set,
-                        &follow_snapshot[dependency],
+                        &follow_snapshot[*dependency],
                     ) {
                         changed = true;
                     }
