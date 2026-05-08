@@ -1,12 +1,23 @@
 use std::{env, fs, io, process};
 
 mod lexer;
+mod syntax;
 
 fn main() {
-    let path = env::args().nth(1).unwrap_or_else(|| {
-        eprintln!("usage: cargo run -- <rule-file>");
+    let mut args = env::args().skip(1);
+    let first_arg = args.next().unwrap_or_else(|| {
+        eprintln!("usage:");
+        eprintln!("  cargo run -- <rule-file>");
+        eprintln!("  cargo run -- syntax");
         process::exit(1);
     });
+
+    if first_arg == "syntax" {
+        syntax::run_demo();
+        return;
+    }
+
+    let path = first_arg;
 
     let content = fs::read_to_string(&path).unwrap_or_else(|err| {
         eprintln!("failed to read file: {path} ({err})");
