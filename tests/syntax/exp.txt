@@ -1,0 +1,10 @@
+%start exp
+%terminals num + - * / ( )
+%nonterminals exp simple_exp addop term mulop factor
+
+exp -> simple_exp
+simple_exp -> simple_exp addop term | term
+addop -> + | -
+term -> term mulop factor | factor
+mulop -> * | /
+factor -> ( exp ) | num
