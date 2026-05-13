@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use super::{
     nfa::{
-        closure_nfa, generate_basic_nfa, plus_closure_nfa, product_nfa, union_nfa, zero_or_one_nfa,
-        CharSetTable, DriverType, Graph, CHARSET_ID_BASE,
+        CHARSET_ID_BASE, CharSetTable, DriverType, Graph, closure_nfa, generate_basic_nfa,
+        merge_nfas, plus_closure_nfa, product_nfa, union_nfa, zero_or_one_nfa,
     },
     rule::TokenRule,
 };
@@ -102,6 +102,254 @@ pub struct RegularTable {
     pub category: Option<LexemeCategory>,
     rows: Vec<RegularExpression>,
     next_id: usize,
+}
+
+pub struct LexerProgram {
+    pub charset_table: CharSetTable,
+    pub nfa: Graph,
+}
+
+#[derive(Clone)]
+enum SemanticValue {
+    Char(char),
+    Charset(usize),
+    Nfa(Graph),
+}
+
+impl SemanticValue {
+    fn into_nfa(self) -> Graph {
+        match self {
+            SemanticValue::Char(ch) => generate_basic_nfa(DriverType::Char, ch as usize),
+            SemanticValue::Charset(id) => generate_basic_nfa(DriverType::Charset, id),
+            SemanticValue::Nfa(graph) => graph,
+        }
+    }
+}
+
+pub fn build_lexer_program(rules: &[TokenRule]) -> Result<LexerProgram, String> {
+    let mut charset_table = CharSetTable::new();
+    let mut symbols = HashMap::new();
+    let mut token_nfas = Vec::new();
+
+    for rule in rules {
+        let tokens = tokenize_regex(&rule.regex)?;
+        let mut parser = RegexLanguageParser::new(&tokens, &symbols, &mut charset_table);
+        let value = parser.parse_expression()?;
+        parser.expect_end()?;
+
+        if is_token_name(&rule.name) {
+            let mut nfa = value.into_nfa();
+            nfa.mark_accepting(Some(rule.name.clone()));
+            symbols.insert(rule.name.clone(), SemanticValue::Nfa(nfa.clone()));
+            token_nfas.push(nfa);
+        } else {
+            symbols.insert(rule.name.clone(), value);
+        }
+    }
+
+    if token_nfas.is_empty() {
+        return Err("no token rules found; token names should be uppercase".to_string());
+    }
+
+    Ok(LexerProgram {
+        charset_table,
+        nfa: merge_nfas(&token_nfas),
+    })
+}
+
+struct RegexLanguageParser<'a> {
+    tokens: &'a [RegexToken],
+    position: usize,
+    symbols: &'a HashMap<String, SemanticValue>,
+    charset_table: &'a mut CharSetTable,
+}
+
+impl<'a> RegexLanguageParser<'a> {
+    fn new(
+        tokens: &'a [RegexToken],
+        symbols: &'a HashMap<String, SemanticValue>,
+        charset_table: &'a mut CharSetTable,
+    ) -> Self {
+        Self {
+            tokens,
+            position: 0,
+            symbols,
+            charset_table,
+        }
+    }
+
+    fn parse_expression(&mut self) -> Result<SemanticValue, String> {
+        self.parse_union()
+    }
+
+    fn expect_end(&self) -> Result<(), String> {
+        if self.position == self.tokens.len() {
+            Ok(())
+        } else {
+            Err(format!(
+                "unexpected token after expression: {:?}",
+                self.tokens[self.position]
+            ))
+        }
+    }
+
+    fn parse_union(&mut self) -> Result<SemanticValue, String> {
+        let mut left = self.parse_concat()?;
+
+        while self.consume_operator('|') {
+            let right = self.parse_concat()?;
+            left = self.apply_union(left, right)?;
+        }
+
+        Ok(left)
+    }
+
+    fn parse_concat(&mut self) -> Result<SemanticValue, String> {
+        let mut left = self.parse_charset_binary()?;
+
+        loop {
+            let explicit_concat = self.consume_operator('.');
+            if !explicit_concat && !self.peek_starts_primary() {
+                break;
+            }
+            let right = self.parse_charset_binary()?;
+            left = SemanticValue::Nfa(product_nfa(&left.into_nfa(), &right.into_nfa()));
+        }
+
+        Ok(left)
+    }
+
+    fn parse_charset_binary(&mut self) -> Result<SemanticValue, String> {
+        let mut left = self.parse_postfix()?;
+
+        loop {
+            if self.consume_operator('~') {
+                let right = self.parse_postfix()?;
+                left = self.apply_range(left, right)?;
+            } else if self.consume_operator('-') {
+                let right = self.parse_postfix()?;
+                left = self.apply_difference(left, right)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(left)
+    }
+
+    fn parse_postfix(&mut self) -> Result<SemanticValue, String> {
+        let mut value = self.parse_primary()?;
+
+        loop {
+            if self.consume_operator('*') {
+                value = SemanticValue::Nfa(closure_nfa(&value.into_nfa()));
+            } else if self.consume_operator('+') {
+                value = SemanticValue::Nfa(plus_closure_nfa(&value.into_nfa()));
+            } else if self.consume_operator('?') {
+                value = SemanticValue::Nfa(zero_or_one_nfa(&value.into_nfa()));
+            } else {
+                break;
+            }
+        }
+
+        Ok(value)
+    }
+
+    fn parse_primary(&mut self) -> Result<SemanticValue, String> {
+        let Some(token) = self.tokens.get(self.position) else {
+            return Err("missing expression operand".to_string());
+        };
+
+        self.position += 1;
+        match token {
+            RegexToken::Char(ch) => Ok(SemanticValue::Char(*ch)),
+            RegexToken::Name(name) => self
+                .symbols
+                .get(name)
+                .cloned()
+                .ok_or_else(|| format!("unknown or forward reference: {name}")),
+            RegexToken::LParen => {
+                let value = self.parse_expression()?;
+                match self.tokens.get(self.position) {
+                    Some(RegexToken::RParen) => {
+                        self.position += 1;
+                        Ok(value)
+                    }
+                    _ => Err("mismatched '('".to_string()),
+                }
+            }
+            RegexToken::RParen => Err("unexpected ')'".to_string()),
+            RegexToken::Operator(op) => Err(format!("operator '{op}' is missing a left operand")),
+        }
+    }
+
+    fn apply_union(
+        &mut self,
+        left: SemanticValue,
+        right: SemanticValue,
+    ) -> Result<SemanticValue, String> {
+        match (left, right) {
+            (SemanticValue::Char(c1), SemanticValue::Char(c2)) => Ok(SemanticValue::Charset(
+                self.charset_table.union_chars(c1, c2),
+            )),
+            (SemanticValue::Charset(id), SemanticValue::Char(c))
+            | (SemanticValue::Char(c), SemanticValue::Charset(id)) => Ok(SemanticValue::Charset(
+                self.charset_table.union_charset_char(id, c)?,
+            )),
+            (SemanticValue::Charset(left_id), SemanticValue::Charset(right_id)) => Ok(
+                SemanticValue::Charset(self.charset_table.union_charsets(left_id, right_id)?),
+            ),
+            (left, right) => Ok(SemanticValue::Nfa(union_nfa(
+                &left.into_nfa(),
+                &right.into_nfa(),
+            ))),
+        }
+    }
+
+    fn apply_range(
+        &mut self,
+        left: SemanticValue,
+        right: SemanticValue,
+    ) -> Result<SemanticValue, String> {
+        match (left, right) {
+            (SemanticValue::Char(from), SemanticValue::Char(to)) => {
+                Ok(SemanticValue::Charset(self.charset_table.range(from, to)?))
+            }
+            _ => Err("range '~' only supports cc ~ cc".to_string()),
+        }
+    }
+
+    fn apply_difference(
+        &mut self,
+        left: SemanticValue,
+        right: SemanticValue,
+    ) -> Result<SemanticValue, String> {
+        match (left, right) {
+            (SemanticValue::Charset(id), SemanticValue::Char(ch)) => Ok(SemanticValue::Charset(
+                self.charset_table.difference_charset_char(id, ch)?,
+            )),
+            _ => Err("difference '-' only supports charset - cc".to_string()),
+        }
+    }
+
+    fn consume_operator(&mut self, expected: char) -> bool {
+        if matches!(
+            self.tokens.get(self.position),
+            Some(RegexToken::Operator(op)) if *op == expected
+        ) {
+            self.position += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn peek_starts_primary(&self) -> bool {
+        matches!(
+            self.tokens.get(self.position),
+            Some(RegexToken::Char(_) | RegexToken::Name(_) | RegexToken::LParen)
+        )
+    }
 }
 
 impl RegularTable {
@@ -382,7 +630,7 @@ impl RegularTable {
                         return Err(format!(
                             "regular id {} does not match charset - char",
                             regular_id
-                        ))
+                        ));
                     }
                 }
             }
@@ -390,7 +638,7 @@ impl RegularTable {
                 return Err(format!(
                     "regular id {} does not evaluate to a charset",
                     regular_id
-                ))
+                ));
             }
         };
 
@@ -811,7 +1059,7 @@ fn infer_category(name: &str) -> Option<LexemeCategory> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_charset_table, build_token_regular_tables, OperandType, RegularTable};
+    use super::{OperandType, RegularTable, build_charset_table, build_token_regular_tables};
     use crate::lexer::rule::parse_rules;
 
     fn parse_table(input: &str, token_name: &str) -> RegularTable {

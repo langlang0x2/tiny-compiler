@@ -1,0 +1,28 @@
+# TINY lexical rules written as named regular expressions.
+# Lowercase names are reusable character sets. Uppercase names are token classes.
+letter -> 'a'~'z' | 'A'~'Z'
+digit -> '0'~'9'
+
+IF -> 'i''f'
+THEN -> 't''h''e''n'
+ELSE -> 'e''l''s''e'
+END -> 'e''n''d'
+REPEAT -> 'r''e''p''e''a''t'
+UNTIL -> 'u''n''t''i''l'
+READ -> 'r''e''a''d'
+WRITE -> 'w''r''i''t''e'
+
+ID -> letter (letter | digit)*
+NUM -> digit+
+
+ASSIGN -> ':''='
+EQ -> '='
+LT -> '<'
+PLUS -> '+'
+MINUS -> '-'
+TIMES -> '*'
+OVER -> '/'
+
+LPAREN -> '('
+RPAREN -> ')'
+SEMI -> ';'

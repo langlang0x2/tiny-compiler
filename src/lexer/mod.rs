@@ -6,15 +6,37 @@ pub mod rule;
 
 use std::{fs, io};
 
-pub use dfa::{dfa_match, nfa_to_dfa};
+pub use dfa::{dfa_match, dfa_scan, nfa_to_dfa};
 pub use nfa::merge_nfas;
-pub use regex::{build_charset_table, build_token_regular_tables};
+pub use regex::{build_charset_table, build_lexer_program, build_token_regular_tables};
 pub use rule::parse_rules;
 
-pub fn run(path: &str) -> Result<(), String> {
+pub fn run(path: &str, source_path: Option<&str>) -> Result<(), String> {
     let content =
         fs::read_to_string(path).map_err(|err| format!("failed to read file: {path} ({err})"))?;
     let rules = parse_rules(&content).map_err(|err| format!("failed to parse rules: {err}"))?;
+
+    if let Some(source_path) = source_path {
+        let source = fs::read_to_string(source_path)
+            .map_err(|err| format!("failed to read file: {source_path} ({err})"))?;
+        let mut program = build_lexer_program(&rules)
+            .map_err(|err| format!("failed to build lexer program: {err}"))?;
+        let dfa = nfa_to_dfa(&program.nfa, &mut program.charset_table)
+            .map_err(|err| format!("failed to build DFA: {err}"))?;
+
+        println!("rules: {}", path);
+        println!("source: {}", source_path);
+        for token in dfa_scan(&dfa, &program.charset_table, &source)
+            .map_err(|err| format!("failed to scan source: {err}"))?
+        {
+            println!(
+                "{:<10} {:<12} line={} column={}",
+                token.category, token.lexeme, token.line, token.column
+            );
+        }
+        return Ok(());
+    }
+
     let tables = build_token_regular_tables(&rules)
         .map_err(|err| format!("failed to build regular tables: {err}"))?;
     let (mut charset_table, _) = build_charset_table(&rules)

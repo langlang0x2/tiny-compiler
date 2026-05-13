@@ -34,8 +34,20 @@ pub fn parse_rules(content: &str) -> Result<Vec<TokenRule>, String> {
 }
 
 fn split_rule_line(line: &str) -> Option<(&str, &str)> {
+    if let Some(index) = line.find("->") {
+        let name = line[..index].trim().trim_start_matches('@');
+        let regex = line[index + 2..].trim();
+        return (!name.is_empty()).then_some((name, regex));
+    }
+
+    if let Some(index) = line.find('®') {
+        let name = line[..index].trim().trim_start_matches('@');
+        let regex = line[index + '®'.len_utf8()..].trim();
+        return (!name.is_empty()).then_some((name, regex));
+    }
+
     let first_gap = line.find(char::is_whitespace)?;
-    let name = line[..first_gap].trim();
+    let name = line[..first_gap].trim().trim_start_matches('@');
     let regex = line[first_gap..].trim().trim_start_matches('=').trim();
 
     if name.is_empty() {

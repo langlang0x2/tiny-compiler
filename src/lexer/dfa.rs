@@ -4,6 +4,14 @@ use std::collections::{BTreeSet, HashMap, VecDeque};
 
 use super::nfa::{CharSetTable, DriverType, Edge, Graph, State, StateType};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScannedToken {
+    pub category: String,
+    pub lexeme: String,
+    pub line: usize,
+    pub column: usize,
+}
+
 pub fn nfa_to_dfa(nfa: &Graph, charset_table: &mut CharSetTable) -> Result<Graph, String> {
     let char_classes = build_char_classes(nfa, charset_table)?;
     let start_set = nfa.epsilon_closure(&BTreeSet::from([nfa.start_state]));
@@ -93,6 +101,127 @@ pub fn dfa_match(
         Ok(state.category.clone())
     } else {
         Ok(None)
+    }
+}
+
+pub fn dfa_scan(
+    dfa: &Graph,
+    charset_table: &CharSetTable,
+    input: &str,
+) -> Result<Vec<ScannedToken>, String> {
+    let chars = input.chars().collect::<Vec<_>>();
+    let mut tokens = Vec::new();
+    let mut index = 0;
+    let mut line = 1;
+    let mut column = 1;
+
+    while index < chars.len() {
+        let ch = chars[index];
+
+        if ch.is_whitespace() {
+            advance_position(ch, &mut line, &mut column);
+            index += 1;
+            continue;
+        }
+
+        if ch == '{' {
+            let start_line = line;
+            let start_column = column;
+            index += 1;
+            advance_position(ch, &mut line, &mut column);
+            while index < chars.len() && chars[index] != '}' {
+                let skipped = chars[index];
+                advance_position(skipped, &mut line, &mut column);
+                index += 1;
+            }
+            if index == chars.len() {
+                return Err(format!(
+                    "unterminated comment at line {start_line}, column {start_column}"
+                ));
+            }
+            advance_position(chars[index], &mut line, &mut column);
+            index += 1;
+            continue;
+        }
+
+        let start_index = index;
+        let start_line = line;
+        let start_column = column;
+        let mut current_state = dfa.start_state;
+        let mut probe = index;
+        let mut last_match: Option<(usize, String)> =
+            accepting_category(dfa, current_state).map(|category| (probe, category));
+
+        while probe < chars.len() {
+            let Some(next_state) = next_state(dfa, charset_table, current_state, chars[probe])?
+            else {
+                break;
+            };
+            current_state = next_state;
+            probe += 1;
+            if let Some(category) = accepting_category(dfa, current_state) {
+                last_match = Some((probe, category));
+            }
+        }
+
+        let Some((end_index, category)) = last_match else {
+            return Err(format!(
+                "unrecognized character '{}' at line {}, column {}",
+                ch, start_line, start_column
+            ));
+        };
+
+        let lexeme = chars[start_index..end_index].iter().collect::<String>();
+        for consumed in &chars[start_index..end_index] {
+            advance_position(*consumed, &mut line, &mut column);
+        }
+        index = end_index;
+
+        tokens.push(ScannedToken {
+            category,
+            lexeme,
+            line: start_line,
+            column: start_column,
+        });
+    }
+
+    Ok(tokens)
+}
+
+fn next_state(
+    dfa: &Graph,
+    charset_table: &CharSetTable,
+    current_state: usize,
+    ch: char,
+) -> Result<Option<usize>, String> {
+    for edge in dfa
+        .edges
+        .iter()
+        .filter(|edge| edge.from_state == current_state)
+    {
+        let Some(driver_id) = edge.driver_id else {
+            continue;
+        };
+        if edge_matches(edge.driver_type, driver_id, ch, charset_table)? {
+            return Ok(Some(edge.to_state));
+        }
+    }
+    Ok(None)
+}
+
+fn accepting_category(dfa: &Graph, state_id: usize) -> Option<String> {
+    dfa.states
+        .iter()
+        .find(|state| state.id == state_id && state.state_type == StateType::Match)
+        .and_then(|state| state.category.clone())
+}
+
+fn advance_position(ch: char, line: &mut usize, column: &mut usize) {
+    if ch == '\n' {
+        *line += 1;
+        *column = 1;
+    } else {
+        *column += 1;
     }
 }
 
@@ -233,7 +362,8 @@ fn build_dfa_state(id: usize, subset: &BTreeSet<usize>, nfa: &Graph) -> State {
 mod tests {
     use super::{dfa_match, nfa_to_dfa};
     use crate::lexer::{
-        build_charset_table, build_token_regular_tables, merge_nfas, rule::parse_rules,
+        build_charset_table, build_lexer_program, build_token_regular_tables, dfa_scan, merge_nfas,
+        rule::parse_rules,
     };
 
     #[test]
@@ -258,10 +388,11 @@ ID letter (letter | digit)*
 
         assert!(!dfa.states.is_empty());
         assert!(!dfa.edges.is_empty());
-        assert!(dfa
-            .states
-            .iter()
-            .any(|state| state.category.as_deref() == Some("ID")));
+        assert!(
+            dfa.states
+                .iter()
+                .any(|state| state.category.as_deref() == Some("ID"))
+        );
     }
 
     #[test]
@@ -287,10 +418,11 @@ ID letter (letter | digit)*
 
         assert!(!dfa.states.is_empty());
         assert!(!dfa.edges.is_empty());
-        assert!(dfa
-            .states
-            .iter()
-            .any(|state| matches!(state.category.as_deref(), Some("IF") | Some("ID"))));
+        assert!(
+            dfa.states
+                .iter()
+                .any(|state| matches!(state.category.as_deref(), Some("IF") | Some("ID")))
+        );
     }
 
     #[test]
@@ -365,5 +497,56 @@ ID letter (letter | digit)*
         let dfa = nfa_to_dfa(&merged_nfa, &mut charset_table).unwrap();
 
         assert!(dfa.edges.len() < 62);
+    }
+
+    #[test]
+    fn dfa_scan_tokenizes_tiny_source() {
+        let rules = parse_rules(
+            r#"
+letter -> 'a'~'z' | 'A'~'Z'
+digit -> '0'~'9'
+READ -> 'r''e''a''d'
+IF -> 'i''f'
+THEN -> 't''h''e''n'
+END -> 'e''n''d'
+ID -> letter (letter | digit)*
+NUM -> digit+
+ASSIGN -> ':''='
+SEMI -> ';'
+LT -> '<'
+"#,
+        )
+        .unwrap();
+        let mut program = build_lexer_program(&rules).unwrap();
+        let dfa = nfa_to_dfa(&program.nfa, &mut program.charset_table).unwrap();
+        let tokens = dfa_scan(
+            &dfa,
+            &program.charset_table,
+            "read x; { comment }\nif 0 < x then\n  x := 1\nend",
+        )
+        .unwrap();
+
+        let pairs = tokens
+            .iter()
+            .map(|token| (token.category.as_str(), token.lexeme.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            pairs,
+            vec![
+                ("READ", "read"),
+                ("ID", "x"),
+                ("SEMI", ";"),
+                ("IF", "if"),
+                ("NUM", "0"),
+                ("LT", "<"),
+                ("ID", "x"),
+                ("THEN", "then"),
+                ("ID", "x"),
+                ("ASSIGN", ":="),
+                ("NUM", "1"),
+                ("END", "end"),
+            ]
+        );
     }
 }

@@ -9,15 +9,17 @@ fn main() {
     let path = args.next().unwrap_or_else(|| {
         eprintln!("usage:");
         eprintln!("  cargo run -- tests/lexer/<rule-file>.txt");
+        eprintln!("  cargo run -- tests/lexer/<rule-file>.txt tests/lexer/<source-file>.tny");
         eprintln!("  cargo run -- tests/syntax/<grammar-file>.txt");
         process::exit(1);
     });
+    let source_path = args.next();
 
     // 主函数只负责分发，具体流程封装在 lexer / syntax 模块里。
     let result = if is_under(&path, "tests", "syntax") {
         syntax::run(&path)
     } else if is_under(&path, "tests", "lexer") {
-        lexer::run(&path)
+        lexer::run(&path, source_path.as_deref())
     } else {
         Err(format!(
             "unknown input path: {path}\nexpected tests/lexer/*.txt or tests/syntax/*.txt"
