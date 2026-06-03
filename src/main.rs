@@ -1,5 +1,6 @@
 use std::{env, path::Path, process};
 
+mod compiler;
 mod lexer;
 mod syntax;
 
@@ -16,7 +17,9 @@ fn main() {
     let source_path = args.next();
 
     // 主函数只负责分发，具体流程封装在 lexer / syntax 模块里。
-    let result = if is_under(&path, "tests", "syntax") {
+    let result = if Path::new(&path).extension().is_some_and(|ext| ext == "tny") {
+        compiler::run(&path)
+    } else if is_under(&path, "tests", "syntax") {
         syntax::run(&path)
     } else if is_under(&path, "tests", "lexer") {
         lexer::run(&path, source_path.as_deref())

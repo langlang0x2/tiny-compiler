@@ -1,6 +1,6 @@
 mod first_follow;
-mod grammar;
-mod grammar_file;
+pub mod grammar;
+pub mod grammar_file;
 mod lr0;
 mod slr;
 
